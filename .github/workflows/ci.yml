@@ -31,10 +31,35 @@ jobs:
             build.log
             test-results/
 
-  # Runs only when build failed on a PR; posts one comment with the cause of each failure.
+  # pgTAP tests in supabase/tests: tenant isolation (RLS), status transitions, integrity.
+  # Starts only Postgres in Docker on the runner, applies all migrations and seed.sql; no secrets.
+  db-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 3.2.0
+
+      - name: Start database (migrations + seed)
+        run: supabase db start
+
+      - name: pgTAP tests
+        shell: bash # pipefail, so a failing test fails the step despite tee
+        run: supabase test db 2>&1 | tee db-test.log
+
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-test-results
+          path: db-test.log
+
+  # Runs only when build or db-tests failed on a PR; posts one comment with the cause of each failure.
   # Read-only except for that comment; never blocks the PR.
   analyze-failures:
-    needs: build
+    needs: [build, db-tests]
     if: failure() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -46,9 +71,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      # All artifacts of failed jobs: ci-artifacts/test-results/ and/or ci-artifacts/db-test-results/
       - uses: actions/download-artifact@v4
         with:
-          name: test-results
           path: ci-artifacts
 
       - uses: anthropics/claude-code-action@v1
@@ -60,7 +85,8 @@ jobs:
           prompt: |
             Tests failed in CI for pull request #${{ github.event.pull_request.number }}.
 
-            Read ci-artifacts/build.log, ci-artifacts/test-results/junit.xml and the PR diff
+            Read the logs in ci-artifacts/: test-results/ (vitest: build.log, junit.xml) and/or
+            db-test-results/db-test.log (pgTAP tests from supabase/tests against the migrations), and the PR diff
             (git diff origin/${{ github.base_ref }}...HEAD). Use the project rules in CLAUDE.md.
 
             For each failing test give: the cause, one category
