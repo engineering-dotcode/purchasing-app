@@ -3,7 +3,7 @@ import { CLOSED_STATUSES, type PurchaseOrderDetails, type PurchaseOrderStatus } 
 
 const SELECT_DETAILS = `
   *,
-  vendor:vendors ( id, name ),
+  vendor:vendors!purchase_orders_vendor_id_fkey ( id, name ),
   lines:purchase_order_lines ( * )
 `;
 
