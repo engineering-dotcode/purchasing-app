@@ -12,7 +12,10 @@ concurrency:
 
 jobs:
   review:
-    if: github.event.pull_request.draft == false
+    # Fork PRs get no secrets: skip them visibly instead of passing silently.
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
@@ -55,3 +58,13 @@ jobs:
             gh pr comment ${{ github.event.pull_request.number }} --body "<markdown>"
           claude_args: |
             --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(gh pr comment:*)"
+
+      # Keep only the newest "## AI review" comment so old reviews do not pile up.
+      - name: Remove outdated AI review comments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | startswith("## AI review"))) | .id' \
+            | head -n -1 \
+            | xargs -r -I{} gh api -X DELETE "repos/${{ github.repository }}/issues/comments/{}"
