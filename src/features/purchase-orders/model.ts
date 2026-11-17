@@ -13,6 +13,24 @@ export type PurchaseOrderDetails = PurchaseOrder & {
 
 export const CLOSED_STATUSES: PurchaseOrderStatus[] = ['RECEIVED', 'CANCELLED', 'REJECTED'];
 
+// Mirrors transition_purchase_order() in 0008_purchase_order_functions.sql.
+// The database is the source of truth; this map only drives which actions the UI offers.
+export const ALLOWED_TRANSITIONS: Record<PurchaseOrderStatus, PurchaseOrderStatus[]> = {
+  DRAFT: ['PENDING_APPROVAL', 'SUBMITTED', 'CANCELLED'],
+  PENDING_APPROVAL: ['SUBMITTED', 'REJECTED', 'CANCELLED'],
+  SUBMITTED: ['CONFIRMED', 'CANCELLED'],
+  CONFIRMED: ['PARTIALLY_RECEIVED', 'RECEIVED', 'CANCELLED'],
+  PARTIALLY_RECEIVED: ['RECEIVED'],
+  RECEIVED: [],
+  CANCELLED: [],
+  REJECTED: [],
+};
+
+export const canTransition = (from: PurchaseOrderStatus, to: PurchaseOrderStatus) =>
+  ALLOWED_TRANSITIONS[from].includes(to);
+
+export const isClosed = (status: PurchaseOrderStatus) => CLOSED_STATUSES.includes(status);
+
 export const STATUS_LABEL: Record<PurchaseOrderStatus, string> = {
   DRAFT: 'Draft',
   PENDING_APPROVAL: 'Pending approval',

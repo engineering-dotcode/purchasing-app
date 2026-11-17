@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - name: Test
+        shell: bash # explicit bash = pipefail, so a failing test fails the step despite tee
+        run: npx vitest run --reporter=default --reporter=junit --outputFile.junit=test-results/junit.xml 2>&1 | tee build.log
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            build.log
+            test-results/
+
+  # Runs only when build failed on a PR; posts one comment with the cause of each failure.
+  # Read-only except for that comment; never blocks the PR.
+  analyze-failures:
+    needs: build
+    if: failure() && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: test-results
+          path: ci-artifacts
+
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: |
+            Tests failed in CI for pull request #${{ github.event.pull_request.number }}.
+
+            Read ci-artifacts/build.log, ci-artifacts/test-results/junit.xml and the PR diff
+            (git diff origin/${{ github.base_ref }}...HEAD). Use the project rules in CLAUDE.md.
+
+            For each failing test give: the cause, one category
+            (Bug in the PR / Test needs updating / Infrastructure or flaky test / Failure not caused by this PR)
+            and the minimal fix.
+
+            Post exactly one comment with:
+            gh pr comment ${{ github.event.pull_request.number }} --body "<markdown>"
+          claude_args: |
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(gh pr comment:*)"
