@@ -1,13 +1,13 @@
 -- Tenant isolation on read: a user sees only their organization's rows,
--- never soft-deleted ones, and nothing at all without an org_id claim.
+-- never soft-deleted ones, and nothing at all without an app_metadata.org_id claim.
 -- Data comes from supabase/seed.sql (Acme Foods and Globex Retail).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(16);
+select plan(18);
 
 -- Acme Foods buyer
 set local role authenticated;
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "org_id": "10000000-0000-0000-0000-000000000001", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "app_metadata": {"org_id": "10000000-0000-0000-0000-000000000001"}, "role": "authenticated"}';
 
 select results_eq('select name from organizations', array['Acme Foods'],
   'Acme sees only its own organization');
@@ -27,7 +27,7 @@ select is_empty($$select 1 from purchase_order_lines where purchase_order_id = '
   'Lines of a soft-deleted order are hidden');
 
 -- Globex Retail buyer
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000002", "org_id": "20000000-0000-0000-0000-000000000002", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000002", "app_metadata": {"org_id": "20000000-0000-0000-0000-000000000002"}, "role": "authenticated"}';
 
 select results_eq('select name from organizations', array['Globex Retail'],
   'Globex sees only its own organization');
@@ -40,11 +40,18 @@ select results_eq('select count(*) from purchase_orders', array[2::bigint],
 select results_eq('select count(*) from purchase_order_lines', array[3::bigint],
   'Globex sees its 3 order lines');
 
--- Signed in, but no org_id claim: current_org_id() is null, so nothing matches.
+-- Signed in, but no app_metadata.org_id claim: current_org_id() is null, so nothing matches.
 set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "role": "authenticated"}';
 
 select is_empty('select 1 from purchase_orders', 'No org_id claim: no orders');
 select is_empty('select 1 from vendors', 'No org_id claim: no vendors');
+
+-- The tenant comes only from app_metadata, which users cannot edit.
+-- A top-level org_id or a user_metadata.org_id (user-editable) is ignored.
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "org_id": "10000000-0000-0000-0000-000000000001", "role": "authenticated"}';
+select is_empty('select 1 from purchase_orders', 'Top-level org_id claim is ignored');
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "user_metadata": {"org_id": "10000000-0000-0000-0000-000000000001"}, "role": "authenticated"}';
+select is_empty('select 1 from purchase_orders', 'user_metadata.org_id is ignored');
 
 -- Anonymous visitor
 set local role anon;

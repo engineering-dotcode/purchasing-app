@@ -6,7 +6,7 @@ select plan(12);
 
 -- Acme Foods buyer
 set local role authenticated;
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "org_id": "10000000-0000-0000-0000-000000000001", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "app_metadata": {"org_id": "10000000-0000-0000-0000-000000000001"}, "role": "authenticated"}';
 
 -- Inserts
 select lives_ok(
@@ -73,7 +73,7 @@ select is_empty(
   'Acme cannot soft-delete a Globex order');
 
 -- Check as Globex that its rows are untouched.
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000002", "org_id": "20000000-0000-0000-0000-000000000002", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000002", "app_metadata": {"org_id": "20000000-0000-0000-0000-000000000002"}, "role": "authenticated"}';
 
 select results_eq(
   $$select notes from purchase_orders where id = 'd2000000-0000-0000-0000-000000000001' and deleted_at is null$$,

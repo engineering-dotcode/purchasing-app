@@ -1,15 +1,24 @@
-// Sends a purchase order to its vendor:
-//   1. moves it to SUBMITTED through the transition_purchase_order RPC
-//      (transition rules stay in the database);
-//   2. emails the vendor the order number, lines and expected date.
+// Sends a purchase order to its vendor.
+//
+//   DRAFT / PENDING_APPROVAL → submit_purchase_order RPC: moves the order to
+//     SUBMITTED (through transition_purchase_order) and queues the vendor email
+//     in purchase_order_emails, in one transaction.
+//   SUBMITTED with an unsent email → retries that email.
+//   Anything else → 409.
+//
+// Then the email is sent and the attempt recorded with
+// record_purchase_order_email_attempt. If sending fails the order stays
+// SUBMITTED with the email unsent (502); calling the function again retries it.
 //
 // Runs as the calling user: the client is built with the anon key and the
 // caller's JWT, so RLS and current_org_id() apply exactly as in the frontend.
 // Never use the service role key here.
 //
-// Email goes through Resend when RESEND_API_KEY is set. Without it the
-// function is in dry-run mode: the status still changes and the email that
-// would have been sent is returned in the response.
+// Email goes through Resend with RESEND_API_KEY (RESEND_API_URL can point
+// elsewhere for tests). Dry-run only with an explicit DRY_RUN=true: nothing is
+// sent, the attempt is recorded as sent and the email is returned. A missing
+// key without DRY_RUN is a failed attempt (502), retryable once the key is set,
+// so a forgotten secret never marks real emails as sent.
 //
 // POST /functions/v1/submit-purchase-order   { "orderId": "<uuid>" }
 
@@ -18,10 +27,25 @@ import { createClient } from 'npm:@supabase/supabase-js@2';
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+// Postgres error code → HTTP status for submit_purchase_order.
+const RPC_STATUS: Record<string, number> = {
+  P0002: 404, // order not found (RLS hides other organizations' orders)
+  '22023': 422, // vendor has no email / order has no lines
+  P0001: 409, // transition not allowed
+};
+
+type EmailRow = { id: string; to_email: string; sent_at: string | null };
+
 Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   if (req.method !== 'POST') return json(405, { error: 'Use POST' });
 
   const authHeader = req.headers.get('Authorization');
@@ -36,35 +60,37 @@ Deno.serve(async (req) => {
     { global: { headers: { Authorization: authHeader } } },
   );
 
-  // Preconditions first, so nothing changes when the email cannot be sent.
   const { data: order, error: readError } = await supabase
     .from('purchase_orders')
     .select(`
       id, order_number, status, expected_at,
-      vendor:vendors!purchase_orders_vendor_id_fkey ( name, email ),
-      lines:purchase_order_lines ( quantity, product:products ( sku, name ) )
+      vendor:vendors!purchase_orders_vendor_id_fkey ( name ),
+      lines:purchase_order_lines ( quantity, product:products ( sku, name ) ),
+      emails:purchase_order_emails ( id, to_email, sent_at )
     `)
     .eq('id', orderId)
     .maybeSingle();
 
   if (readError) return json(500, { error: readError.message });
-  // RLS hides other organizations' orders, so "not yours" is also 404.
   if (!order) return json(404, { error: 'Purchase order not found' });
-  if (!order.vendor?.email) return json(422, { error: 'Vendor has no email' });
-  if (order.lines.length === 0) return json(422, { error: 'Purchase order has no lines' });
 
-  const { error: rpcError } = await supabase.rpc('transition_purchase_order', {
-    p_order_id: orderId,
-    p_next: 'SUBMITTED',
-  });
-  // The RPC rejects invalid transitions, including a second submit: no duplicate email.
-  if (rpcError) return json(409, { error: rpcError.message });
+  let email: EmailRow | undefined;
+  if (order.status === 'DRAFT' || order.status === 'PENDING_APPROVAL') {
+    const { data, error } = await supabase.rpc('submit_purchase_order', { p_order_id: orderId });
+    if (error) return json(RPC_STATUS[error.code] ?? 500, { error: error.message });
+    email = data as EmailRow;
+  } else {
+    email = (order.emails as EmailRow[]).find((e) => !e.sent_at);
+    if (order.status !== 'SUBMITTED' || !email) {
+      return json(409, { error: `Order is ${order.status} and its email was already sent` });
+    }
+  }
 
-  const email = {
-    to: order.vendor.email,
+  const message = {
+    to: email.to_email,
     subject: `Purchase order ${order.order_number}`,
     text: [
-      `Hello ${order.vendor.name},`,
+      `Hello ${order.vendor?.name},`,
       '',
       `Please find our purchase order ${order.order_number}.`,
       `Expected delivery: ${order.expected_at ?? 'not set'}`,
@@ -73,25 +99,55 @@ Deno.serve(async (req) => {
     ].join('\n'),
   };
 
-  const resendKey = Deno.env.get('RESEND_API_KEY');
-  if (!resendKey) return json(200, { status: 'SUBMITTED', dryRun: true, email });
+  const sendError = await send(message);
 
-  const sent = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${resendKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      from: Deno.env.get('EMAIL_FROM') ?? 'onboarding@resend.dev',
-      to: email.to,
-      subject: email.subject,
-      text: email.text,
-    }),
-  });
-
-  if (!sent.ok) {
-    // The order is already SUBMITTED and cannot go back; report it so it can be resent by hand.
-    console.error('Email failed', order.order_number, sent.status, await sent.text());
-    return json(502, { status: 'SUBMITTED', error: 'Order submitted, but the email was not sent' });
+  const { data: recorded, error: recordError } = await supabase.rpc(
+    'record_purchase_order_email_attempt',
+    { p_email_id: email.id, p_error: sendError },
+  );
+  if (recordError) {
+    console.error('Could not record email attempt', order.order_number, recordError.message);
   }
 
-  return json(200, { status: 'SUBMITTED', dryRun: false, to: email.to });
+  if (sendError) {
+    console.error('Email failed', order.order_number, sendError);
+    return json(502, {
+      status: 'SUBMITTED',
+      emailSent: false,
+      attempts: recorded?.attempts,
+      error: 'Order submitted, but the email was not sent. Call again to retry.',
+    });
+  }
+
+  const dryRun = isDryRun();
+  return json(200, {
+    status: 'SUBMITTED',
+    emailSent: true,
+    attempts: recorded?.attempts,
+    dryRun,
+    ...(dryRun ? { email: message } : { to: message.to }),
+  });
 });
+
+const isDryRun = () => Deno.env.get('DRY_RUN') === 'true';
+
+// Returns null when sent, otherwise the error text.
+async function send(message: { to: string; subject: string; text: string }): Promise<string | null> {
+  if (isDryRun()) return null;
+  const key = Deno.env.get('RESEND_API_KEY');
+  if (!key) return 'RESEND_API_KEY is not set';
+
+  try {
+    const res = await fetch(Deno.env.get('RESEND_API_URL') ?? 'https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        from: Deno.env.get('EMAIL_FROM') ?? 'onboarding@resend.dev',
+        ...message,
+      }),
+    });
+    return res.ok ? null : `Email provider returned ${res.status}: ${(await res.text()).slice(0, 500)}`;
+  } catch (e) {
+    return `Email provider unreachable: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}

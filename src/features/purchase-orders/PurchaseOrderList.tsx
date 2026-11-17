@@ -1,7 +1,13 @@
 import { useState } from 'react';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import { usePurchaseOrders, usePurchaseOrdersLiveUpdates, useTransitionPurchaseOrder } from './hooks';
-import { STATUS_LABEL, type PurchaseOrderDetails, type PurchaseOrderStatus } from './model';
+import { usePurchaseOrders, usePurchaseOrdersLiveUpdates, useSubmitPurchaseOrder } from './hooks';
+import {
+  STATUS_LABEL,
+  SUBMITTABLE_STATUSES,
+  unsentEmail,
+  type PurchaseOrderDetails,
+  type PurchaseOrderStatus,
+} from './model';
 
 const PAGE_SIZE = 25;
 
@@ -67,7 +73,8 @@ export function PurchaseOrderList() {
 }
 
 function PurchaseOrderRow({ order }: { order: PurchaseOrderDetails }) {
-  const { mutate: transition, isPending, error } = useTransitionPurchaseOrder();
+  const { mutate: submit, isPending, error } = useSubmitPurchaseOrder();
+  const pendingEmail = unsentEmail(order);
 
   return (
     <li className="flex items-center justify-between rounded-lg border border-slate-200 p-4">
@@ -77,6 +84,12 @@ function PurchaseOrderRow({ order }: { order: PurchaseOrderDetails }) {
           {order.vendor?.name ?? 'No vendor'} · {order.lines.length} lines ·{' '}
           {currency.format(order.total_amount)}
         </span>
+        {pendingEmail && (
+          <span className="text-sm text-amber-700">
+            Email to {pendingEmail.to_email} not sent ({pendingEmail.attempts} attempts)
+            {pendingEmail.last_error ? `: ${pendingEmail.last_error}` : ''}
+          </span>
+        )}
         {error && <span className="text-sm text-rose-600">{error.message}</span>}
       </div>
 
@@ -85,13 +98,13 @@ function PurchaseOrderRow({ order }: { order: PurchaseOrderDetails }) {
           {STATUS_LABEL[order.status]}
         </span>
 
-        {order.status === 'DRAFT' && (
+        {(SUBMITTABLE_STATUSES.includes(order.status) || pendingEmail) && (
           <button
             className="rounded-lg bg-blue-600 px-3 py-1.5 text-white disabled:opacity-50"
             disabled={isPending}
-            onClick={() => transition({ id: order.id, next: 'SUBMITTED' })}
+            onClick={() => submit(order.id)}
           >
-            Submit to vendor
+            {pendingEmail ? 'Retry email' : 'Submit to vendor'}
           </button>
         )}
       </div>

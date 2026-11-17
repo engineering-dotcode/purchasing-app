@@ -5,6 +5,8 @@ Purchase orders module: React + TanStack React Query on the frontend, Supabase (
 ## Structure
 
 - `supabase/migrations/` — numbered SQL migrations (`NNNN_snake_case.sql`), schema + RLS + Postgres functions
+- `supabase/tests/` — pgTAP tests (`supabase test db`)
+- `supabase/functions/<name>/` — Edge Functions (`index.ts`) and their end-to-end tests (`e2e.mjs`, run by `scripts/test-edge-functions.sh`)
 - `src/lib/supabase.ts` — the single Supabase client (anon key only)
 - `src/features/<feature>/` — one folder per feature:
   - `model.ts` — types derived from `@/types/database` and domain constants
@@ -20,7 +22,8 @@ Purchase orders module: React + TanStack React Query on the frontend, Supabase (
 2. **Soft delete only.** Set `deleted_at`; never `DELETE` business rows. Unique indexes are partial: `where deleted_at is null`.
 3. **Status changes go through the database.** Use the `transition_purchase_order` RPC; never update `status` directly. Allowed transitions live in that function.
 4. **Never edit an applied migration.** Add a new one with the next number.
-5. Frontend data-access conventions: `.claude/rules/frontend-data.md` (loads when working in `src/`).
+5. **Edge Functions run as the caller**: anon key + the request's `Authorization` header, never the service role key. Business rules stay in RPC functions; the Edge Function only does what needs a server-side secret (e.g. sending email).
+6. Frontend data-access conventions: `.claude/rules/frontend-data.md` (loads when working in `src/`).
 
 ## Working here
 

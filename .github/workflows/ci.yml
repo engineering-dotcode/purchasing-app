@@ -31,23 +31,35 @@ jobs:
             build.log
             test-results/
 
-  # pgTAP tests in supabase/tests: tenant isolation (RLS), status transitions, integrity.
-  # Starts only Postgres in Docker on the runner, applies all migrations and seed.sql; no secrets.
+  # pgTAP tests in supabase/tests (tenant isolation, status transitions, integrity, email outbox),
+  # then end-to-end tests of the Edge Functions against the same stack with a mock email provider.
+  # Starts Postgres, the API gateway, PostgREST and Auth in Docker on the runner; no secrets.
   db-tests:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
       - uses: supabase/setup-cli@v1
         with:
           version: 3.2.0
 
-      - name: Start database (migrations + seed)
-        run: supabase db start
+      - name: Start Supabase (migrations + seed)
+        run: supabase start -x studio,imgproxy,storage-api,realtime,mailpit,logflare,vector,supavisor,postgres-meta
 
+      # pgTAP tests roll back; they run first because the Edge Function tests change seed data.
       - name: pgTAP tests
         shell: bash # pipefail, so a failing test fails the step despite tee
         run: supabase test db 2>&1 | tee db-test.log
+
+      - name: Edge Function tests
+        shell: bash
+        env:
+          SUPABASE: supabase
+        run: ./scripts/test-edge-functions.sh 2>&1 | tee -a db-test.log
 
       - name: Upload test log
         if: failure()
@@ -86,7 +98,7 @@ jobs:
             Tests failed in CI for pull request #${{ github.event.pull_request.number }}.
 
             Read the logs in ci-artifacts/: test-results/ (vitest: build.log, junit.xml) and/or
-            db-test-results/db-test.log (pgTAP tests from supabase/tests against the migrations), and the PR diff
+            db-test-results/db-test.log (pgTAP tests from supabase/tests against the migrations, then Edge Function e2e tests from supabase/functions/*/e2e.mjs), and the PR diff
             (git diff origin/${{ github.base_ref }}...HEAD). Use the project rules in CLAUDE.md.
 
             For each failing test give: the cause, one category
