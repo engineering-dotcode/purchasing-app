@@ -104,5 +104,8 @@ update purchase_orders po
      from purchase_order_lines l where l.purchase_order_id = po.id
    );
 
--- create_purchase_order() numbers new orders from this sequence; continue after the seed.
-select setval('purchase_order_number_seq', 9);
+-- create_purchase_order() numbers each organization's orders from its counter; continue after the seed.
+insert into purchase_order_counters (organization_id, last_number)
+select organization_id, max(substring(order_number from '\d+$')::integer)
+from purchase_orders
+group by organization_id;

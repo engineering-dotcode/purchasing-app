@@ -67,9 +67,7 @@ export async function transitionPurchaseOrder(id: string, next: PurchaseOrderSta
 }
 
 export async function archivePurchaseOrder(id: string) {
-  const { error } = await supabase
-    .from('purchase_orders')
-    .update({ deleted_at: new Date().toISOString() })
-    .eq('id', id);
+  // RPC, not .update({ deleted_at }): RLS rejects that update (see 0009_fix_tenant_gaps.sql).
+  const { error } = await supabase.rpc('archive_purchase_order', { p_order_id: id });
   if (error) throw error;
 }
