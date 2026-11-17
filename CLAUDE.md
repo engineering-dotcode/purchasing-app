@@ -26,3 +26,5 @@ Purchase orders module: React + TanStack React Query on the frontend, Supabase (
 
 - Any schema change (table, column, index, policy, function) → follow the `supabase-migration` skill.
 - After schema or RLS changes → run the `rls-reviewer` agent before finishing.
+- The `supabase` MCP server (`.mcp.json`) is a **read-only** connection to the dev project. Use it to check the live schema, data and logs instead of guessing, and to regenerate `src/types/database.ts`. It connects as the project owner and bypasses RLS: it sees every organization, so it cannot prove tenant isolation.
+- Local CLI: `npx supabase link --project-ref <ref>`, then `npx supabase db push --include-seed`. Demo data lives in `supabase/seed.sql`.
