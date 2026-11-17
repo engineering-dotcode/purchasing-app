@@ -1,0 +1,57 @@
+name: AI review
+
+# Claude reviews every PR diff against the project rules and posts one comment.
+# Advisory only: read-only access to the code, never blocks the PR.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: ai-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  review:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: anthropics/claude-code-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: |
+            Review pull request #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+
+            Get the diff with: git diff origin/${{ github.base_ref }}...HEAD
+            Read the changed files in full where you need context.
+
+            Review against the project rules: CLAUDE.md, .claude/rules/multi-tenancy.md,
+            .claude/rules/frontend-data.md, .claude/skills/supabase-migration/SKILL.md, and the
+            tenant-isolation checklist in .claude/agents/rls-reviewer.md. Focus on:
+            - RLS and multi-tenancy: every table has RLS and a current_org_id() policy that hides
+              soft-deleted rows; with check blocks writes into another organization; foreign keys
+              cannot point at another organization's rows; organization_id never comes from the client;
+              no service role key in src/.
+            - Soft delete: no DELETE of business rows, unique indexes partial on deleted_at is null.
+            - Migrations: applied migrations are never edited; new ones use the next number.
+            - Status changes go through transition_purchase_order, never a direct update of status.
+            - Real correctness bugs in the changed code.
+
+            Report only real problems introduced or touched by this PR, most severe first, each as:
+            `file:line` — what is wrong — why it matters — the minimal fix.
+            If there are none, say so in one line. Do not praise, do not summarize the PR.
+
+            Post exactly one comment, starting with the heading "## AI review":
+            gh pr comment ${{ github.event.pull_request.number }} --body "<markdown>"
+          claude_args: |
+            --allowedTools "Read,Grep,Glob,Bash(git diff:*),Bash(git log:*),Bash(gh pr comment:*)"
