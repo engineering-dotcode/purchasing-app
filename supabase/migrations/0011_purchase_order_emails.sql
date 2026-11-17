@@ -8,7 +8,11 @@
 -- function again for the same order.
 --
 -- Clients can only read the outbox. Writes go through the two RPCs below, so a
--- user cannot redirect an email (to_email) or fake its state through PostgREST.
+-- user cannot redirect an email (to_email) or insert/delete rows through
+-- PostgREST. Known gap: record_purchase_order_email_attempt is callable by any
+-- member of the organization (the Edge Function uses the caller's JWT, so the
+-- database cannot tell them apart), so a member can mark a queued email as sent
+-- without sending it. It cannot affect another organization.
 
 -- Lets purchase_order_emails reference an order of the same organization.
 create unique index purchase_orders_org_id_uq on purchase_orders (organization_id, id);
