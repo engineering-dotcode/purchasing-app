@@ -5,6 +5,7 @@ import {
   createPurchaseOrder,
   getPurchaseOrder,
   listPurchaseOrders,
+  submitPurchaseOrder,
   transitionPurchaseOrder,
   type ListParams,
 } from './api';
@@ -44,6 +45,15 @@ export const useTransitionPurchaseOrder = () => {
     mutationFn: ({ id, next }: { id: string; next: PurchaseOrderStatus }) =>
       transitionPurchaseOrder(id, next),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.all }),
+  });
+};
+
+// Also on failure: a 502 means the order is SUBMITTED but the email still has to be retried.
+export const useSubmitPurchaseOrder = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: submitPurchaseOrder,
+    onSettled: () => queryClient.invalidateQueries({ queryKey: purchaseOrderKeys.all }),
   });
 };
 

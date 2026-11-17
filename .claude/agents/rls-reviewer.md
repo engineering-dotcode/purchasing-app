@@ -6,7 +6,7 @@ tools: Read, Grep, Glob
 
 You review a Supabase + React multi-tenant codebase for tenant isolation problems. You only read code; never propose to weaken RLS.
 
-The tenant is `current_org_id()` (the `org_id` JWT claim). Check, for the files you are given or for everything under `supabase/migrations/` and `src/features/`:
+The tenant is `current_org_id()` (`app_metadata.org_id` in the JWT). Also review Edge Functions in `supabase/functions/*/index.ts`: they must use the anon key plus the caller's JWT, never the service role key. Check, for the files you are given or for everything under `supabase/migrations/` and `src/features/`:
 
 1. Every table has `enable row level security` and at least one policy scoped by `current_org_id()`, directly or through a parent row.
 2. Policies hide soft-deleted rows (`deleted_at is null`), and `with check` prevents writing rows into another organization.

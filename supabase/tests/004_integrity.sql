@@ -6,7 +6,7 @@ select plan(12);
 
 -- Acme Foods buyer
 set local role authenticated;
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "org_id": "10000000-0000-0000-0000-000000000001", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "app_metadata": {"org_id": "10000000-0000-0000-0000-000000000001"}, "role": "authenticated"}';
 
 -- 1. References stay inside the organization
 select throws_ok(
@@ -39,26 +39,26 @@ select lives_ok(
   'An Acme order line can use an Acme product');
 
 -- 2. Order numbers per organization: Acme's orders do not move Globex's numbering.
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000002", "org_id": "20000000-0000-0000-0000-000000000002", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000002", "app_metadata": {"org_id": "20000000-0000-0000-0000-000000000002"}, "role": "authenticated"}';
 select is(
   (select order_number from create_purchase_order('b2000000-0000-0000-0000-000000000001', null, null,
      '[{"productId": "c2000000-0000-0000-0000-000000000001", "quantity": 1, "unitPrice": 1}]')),
   'PO-000010', 'Globex continues after its highest number (PO-000009)');
 
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "org_id": "10000000-0000-0000-0000-000000000001", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "app_metadata": {"org_id": "10000000-0000-0000-0000-000000000001"}, "role": "authenticated"}';
 select is(
   (select order_number from create_purchase_order('b1000000-0000-0000-0000-000000000001', null, null,
      '[{"productId": "c1000000-0000-0000-0000-000000000001", "quantity": 1, "unitPrice": 1}]')),
   'PO-000008', 'Acme continues after its highest number (PO-000007, soft-deleted, not reused)');
 
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000002", "org_id": "20000000-0000-0000-0000-000000000002", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000002", "app_metadata": {"org_id": "20000000-0000-0000-0000-000000000002"}, "role": "authenticated"}';
 select is(
   (select order_number from create_purchase_order('b2000000-0000-0000-0000-000000000001', null, null,
      '[{"productId": "c2000000-0000-0000-0000-000000000001", "quantity": 1, "unitPrice": 1}]')),
   'PO-000011', 'Globex numbering is not affected by Acme creating an order');
 
 -- 3. Soft delete goes through archive_purchase_order
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "org_id": "10000000-0000-0000-0000-000000000001", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "app_metadata": {"org_id": "10000000-0000-0000-0000-000000000001"}, "role": "authenticated"}';
 
 select lives_ok(
   $$select archive_purchase_order('d1000000-0000-0000-0000-000000000002')$$,

@@ -77,6 +77,32 @@ isOneToOne: true
       referencedColumns: ["id"]
     }
                   ]
+                },"purchase_order_emails": {
+                  Row: {
+                    "attempts": number,"created_at": string,"created_by": string,"deleted_at": string | null,"id": string,"last_error": string | null,"organization_id": string,"purchase_order_id": string,"sent_at": string | null,"to_email": string,"updated_at": string
+                  }
+                  ComputedFields: never
+                  Insert: {
+                    "attempts"?: number,"created_at"?: string,"created_by": string,"deleted_at"?: string | null,"id"?: string,"last_error"?: string | null,"organization_id": string,"purchase_order_id": string,"sent_at"?: string | null,"to_email": string,"updated_at"?: string
+                  }
+                  Update: {
+                    "attempts"?: number,"created_at"?: string,"created_by"?: string,"deleted_at"?: string | null,"id"?: string,"last_error"?: string | null,"organization_id"?: string,"purchase_order_id"?: string,"sent_at"?: string | null,"to_email"?: string,"updated_at"?: string
+                  }
+                  Relationships: [
+                    {
+      foreignKeyName: "purchase_order_emails_organization_id_fkey"
+      columns: ["organization_id"]
+isOneToOne: false
+      referencedRelation: "organizations"
+      referencedColumns: ["id"]
+    },{
+      foreignKeyName: "purchase_order_emails_organization_id_purchase_order_id_fkey"
+      columns: ["organization_id","purchase_order_id"]
+isOneToOne: false
+      referencedRelation: "purchase_orders"
+      referencedColumns: ["organization_id","id"]
+    }
+                  ]
                 },"purchase_order_lines": {
                   Row: {
                     "id": string,"product_id": string,"purchase_order_id": string,"quantity": number,"received_quantity": number,"unit_price": number
@@ -189,6 +215,46 @@ isOneToOne: false
 "current_org_id":
 { Args: Record<PropertyKey, never>; Returns: string
                            },
+"record_purchase_order_email_attempt":
+{ Args: { "p_email_id": string,"p_error": string }; Returns: {
+              "attempts": number,
+"created_at": string,
+"created_by": string,
+"deleted_at": string | null,
+"id": string,
+"last_error": string | null,
+"organization_id": string,
+"purchase_order_id": string,
+"sent_at": string | null,
+"to_email": string,
+"updated_at": string
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "purchase_order_emails"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
+"submit_purchase_order":
+{ Args: { "p_order_id": string }; Returns: {
+              "attempts": number,
+"created_at": string,
+"created_by": string,
+"deleted_at": string | null,
+"id": string,
+"last_error": string | null,
+"organization_id": string,
+"purchase_order_id": string,
+"sent_at": string | null,
+"to_email": string,
+"updated_at": string
+            }
+                          SetofOptions: {
+        from: "*"
+        to: "purchase_order_emails"
+        isOneToOne: true
+        isSetofReturn: false
+      } },
 "transition_purchase_order":
 { Args: { "p_next": Database["public"]['Enums']["purchase_order_status"],"p_order_id": string }; Returns: {
               "created_at": string,

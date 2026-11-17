@@ -1,10 +1,12 @@
+import { FunctionsHttpError } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { CLOSED_STATUSES, type PurchaseOrderDetails, type PurchaseOrderStatus } from './model';
 
 const SELECT_DETAILS = `
   *,
-  vendor:vendors ( id, name ),
-  lines:purchase_order_lines ( * )
+  vendor:vendors!purchase_orders_vendor_id_fkey ( id, name ),
+  lines:purchase_order_lines ( * ),
+  emails:purchase_order_emails ( id, to_email, attempts, last_error, sent_at )
 `;
 
 export type ListParams = {
@@ -64,6 +66,31 @@ export async function transitionPurchaseOrder(id: string, next: PurchaseOrderSta
   });
   if (error) throw error;
   return data;
+}
+
+export type SubmitPurchaseOrderResult = {
+  status: 'SUBMITTED';
+  emailSent: boolean;
+  attempts?: number;
+  dryRun?: boolean;
+};
+
+// Moves the order to SUBMITTED and emails the vendor, or retries an unsent email.
+// An Edge Function, not the RPC directly: sending the email needs a server-side key.
+export async function submitPurchaseOrder(id: string) {
+  const { data, error } = await supabase.functions.invoke<SubmitPurchaseOrderResult>(
+    'submit-purchase-order',
+    { body: { orderId: id } }
+  );
+  if (error) {
+    // Surface the function's own message ("Vendor has no email", ...) instead of "non-2xx status".
+    if (error instanceof FunctionsHttpError) {
+      const body = await error.context.json().catch(() => null);
+      if (body?.error) throw new Error(body.error);
+    }
+    throw error;
+  }
+  return data!;
 }
 
 export async function archivePurchaseOrder(id: string) {

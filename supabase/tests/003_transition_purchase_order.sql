@@ -2,16 +2,22 @@
 -- and another organization's order cannot be found at all (RLS inside a security invoker function).
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(9);
+select plan(10);
 
 -- Acme Foods buyer
 set local role authenticated;
-set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "org_id": "10000000-0000-0000-0000-000000000001", "role": "authenticated"}';
+set local request.jwt.claims = '{"sub": "a0000000-0000-0000-0000-000000000001", "app_metadata": {"org_id": "10000000-0000-0000-0000-000000000001"}, "role": "authenticated"}';
 
--- PO-000001 is DRAFT
+-- PO-000001 is DRAFT. SUBMITTED needs the vendor email queued (0011), so
+-- transition_purchase_order alone refuses it and submit_purchase_order does it.
+select throws_ok(
+  $$select transition_purchase_order('d1000000-0000-0000-0000-000000000001', 'SUBMITTED')$$,
+  'P0001', 'Use submit_purchase_order to submit a purchase order',
+  'DRAFT -> SUBMITTED directly is refused (no queued email)');
+select submit_purchase_order('d1000000-0000-0000-0000-000000000001');
 select results_eq(
-  $$select status::text from transition_purchase_order('d1000000-0000-0000-0000-000000000001', 'SUBMITTED')$$,
-  array['SUBMITTED'], 'DRAFT -> SUBMITTED is allowed');
+  $$select status::text from purchase_orders where id = 'd1000000-0000-0000-0000-000000000001'$$,
+  array['SUBMITTED'], 'DRAFT -> SUBMITTED through submit_purchase_order');
 select results_eq(
   $$select status::text from transition_purchase_order('d1000000-0000-0000-0000-000000000001', 'CONFIRMED')$$,
   array['CONFIRMED'], 'SUBMITTED -> CONFIRMED is allowed');
