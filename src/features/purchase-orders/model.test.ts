@@ -19,6 +19,10 @@ describe('canTransition', () => {
     expect(ALLOWED_TRANSITIONS.CANCELLED).toEqual([]);
     expect(ALLOWED_TRANSITIONS.REJECTED).toEqual([]);
   });
+
+  it('allows cancelling a partially received order', () => {
+    expect(canTransition('PARTIALLY_RECEIVED', 'CANCELLED')).toBe(true);
+  });
 });
 
 describe('isClosed', () => {
